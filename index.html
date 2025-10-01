@@ -17,7 +17,7 @@
     *{box-sizing:border-box}
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
-    .wrap{max-width:720px;margin:0 auto;padding:16px}
+    .wrap{max-width:820px;margin:0 auto;padding:16px}
     h1{margin:8px 0 12px;font-size:20px}
     .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px;margin-bottom:12px}
     .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -25,7 +25,7 @@
     [data-theme="light"] .btn{background:#f3e8ff;color:#111;border-color:#e9d5ff}
     .btn.primary{background:linear-gradient(135deg,#8b5cf6,#a78bfa);color:#111;border:0}
     .muted{color:var(--muted)}
-    .kv{display:grid;grid-template-columns:140px 1fr;gap:6px 10px;font-size:15px}
+    .kv{display:grid;grid-template-columns:180px 1fr;gap:6px 10px;font-size:15px}
     .kv div:nth-child(odd){color:var(--muted)}
     .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;border:1px solid var(--border);background:#101327}
     .dot{width:10px;height:10px;border-radius:999px}
@@ -41,8 +41,15 @@
     .switch .thumb{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:.2s}
     .switch input:checked + .track{background:#8b5cf6}
     .switch input:checked + .track + .thumb{left:23px}
-    .toast{position:fixed;right:14px;bottom:14px;background:#11152c;border:1px solid var(--border);color:#f3f5ff;padding:10px 12px;border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.35);opacity:0;transform:translateY(8px);transition:all .2s}
+    .toast{position:fixed;right:14px;bottom:14px;background:#11152c;border:1px solid var(--border);color:#f3f5ff;padding:10px 12px;border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.35);opacity:0;transform:translateY(8px);transition:all .2s;z-index:999}
     .toast.show{opacity:1;transform:none}
+    /* Manual modal */
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:998}
+    .modal .panel{width:min(720px,100%);background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
+    .input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text)}
+    .listbox{max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:10px;margin-top:8px}
+    .lb-item{padding:10px;border-bottom:1px dashed var(--border);cursor:pointer}
+    .lb-item:last-child{border-bottom:0}
   </style>
 </head>
 <body>
@@ -52,19 +59,17 @@
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <div class="row">
-          <button id="startBtn" class="btn primary">Start</button>
+          <button id="startBtn" class="btn primary">Start GPS</button>
           <button id="stopBtn" class="btn">Stop</button>
+          <button id="manualBtn" class="btn">Manual Mode</button>
         </div>
         <div class="row">
           <span class="muted">Light</span>
-          <label class="switch" title="Theme">
-            <input id="theme" type="checkbox">
-            <span class="track"></span><span class="thumb"></span>
-          </label>
+          <label class="switch" title="Theme"><input id="theme" type="checkbox"><span class="track"></span><span class="thumb"></span></label>
         </div>
       </div>
       <div class="hint" style="margin-top:8px">
-        Tip: keep the phone by a window; enable “Precise Location”. We only use GPS on your device.
+        We infer your bus by detecting two consecutive stops you pass and intersecting vehicles due at both.
       </div>
     </div>
 
@@ -89,9 +94,33 @@
       <ul id="timeline" class="list"></ul>
     </div>
 
-    <p class="hint">
-      Powered by TfL Unified API. We look at consecutive stop visits and intersect vehicles that were due at both stops on the same line.
-    </p>
+    <p class="hint">Runs offline as PWA (installs to home screen). Requires HTTPS for GPS (GitHub Pages is fine).</p>
+  </div>
+
+  <!-- Manual Mode Modal -->
+  <div id="manualModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="manualTitle">
+    <div class="panel">
+      <h3 id="manualTitle" style="margin:4px 0 10px">Manual Mode — pick your last two stops</h3>
+      <div class="row" style="gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:260px">
+          <div class="muted" style="margin-bottom:6px">Stop A (where you just were)</div>
+          <input id="qA" class="input" placeholder="Search stop or place…" />
+          <div id="lbA" class="listbox" aria-label="Results A"></div>
+        </div>
+        <div style="flex:1;min-width:260px">
+          <div class="muted" style="margin-bottom:6px">Stop B (the next stop you reached)</div>
+          <input id="qB" class="input" placeholder="Search stop or place…" />
+          <div id="lbB" class="listbox" aria-label="Results B"></div>
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:10px">
+        <button id="useABtn" class="btn">Use A</button>
+        <button id="useBBtn" class="btn">Use B</button>
+        <button id="inferBtn" class="btn primary">Infer Bus</button>
+        <button id="closeManual" class="btn">Close</button>
+      </div>
+      <div class="hint" id="manualHint" style="margin-top:6px">Tip: choose two consecutive stops on the same line.</div>
+    </div>
   </div>
 
   <div id="toast" class="toast">Copied!</div>
@@ -113,6 +142,7 @@
     const nearbyStops=(lat,lon,radius=120)=> tfl(`/StopPoint?${qs({lat,lon,stopTypes:'NaptanPublicBusCoachTram',radius,modes:'bus'})}`);
     const arrivalsAt=(stopId)=> tfl(`/StopPoint/${encodeURIComponent(stopId)}/Arrivals?${qs({modes:'bus'})}`);
     const lineSeq=(line,dir)=> tfl(`/Line/${encodeURIComponent(line)}/Route/Sequence/${dir}?${qs({excludeCrowding:true,serviceTypes:'Regular'})}`);
+    const searchStops=(q)=> tfl(`/StopPoint/Search?${qs({query:q,modes:'bus',types:'NaptanPublicBusCoachTram'})}`);
     const hav=(a,b)=>{const toRad=x=>x*Math.PI/180;const R=6371000;const dLat=toRad(b.lat-a.lat),dLon=toRad(b.lon-a.lon);const s1=Math.sin(dLat/2),s2=Math.sin(dLon/2);const c1=Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat));return 2*R*Math.asin(Math.sqrt(s1*s1+c1*s2*s2));};
 
     /* ===== UI refs ===== */
@@ -126,17 +156,15 @@
     const timeline = document.getElementById('timeline');
 
     const startBtn=document.getElementById('startBtn'), stopBtn=document.getElementById('stopBtn');
+    const manualBtn=document.getElementById('manualBtn');
 
     /* ===== State ===== */
     let watchId=null;
     let lastFix=null;
-    let lastStop=null;          // {id,name,when}
+    let lastStop=null;          // {id,name,when,lat,lon}
     let prevStop=null;
-    let lastArrivalsA=null;     // arrivals snapshot at prev stop
-    let lastArrivalsB=null;     // arrivals snapshot at last stop
     let inferred=null;          // {line, dir, vehicleId, conf:0..1}
-    let lockLine=null;          // line we’re tracking once inferred
-    let knownDirection=null;    // 'inbound' or 'outbound'
+    let knownDirection=null;    // 'inbound' | 'outbound'
 
     /* ===== Helpers ===== */
     function labelFix(p){ if(!p) return '—'; const acc = p.coords.accuracy|0; return `${p.coords.latitude.toFixed(5)}, ${p.coords.longitude.toFixed(5)} · ±${acc} m`; }
@@ -152,57 +180,46 @@
         const d = hav({lat,lon},{lat:s.lat,lon:s.lon});
         if(d<dBest){ dBest=d; best=s; }
       }
-      return {id:best.id,name:best.commonName||best.name, distance:dBest};
+      return {id:best.id,name:best.commonName||best.name, distance:dBest, lat:best.lat, lon:best.lon};
     }
-
     function vehiclesForLine(arr,line){
       const L = String(line).toUpperCase();
       return arr.filter(a=>{
         const id=(a.lineId||'').toUpperCase(), nm=(a.lineName||'').toUpperCase();
         return id===L || nm===L || id.startsWith(L) || nm.startsWith(L);
-      }).map(a=>({vehicleId:a.vehicleId, expected:new Date(a.expectedArrival), naptanId:a.naptanId}));
+      }).map(a=>({vehicleId:a.vehicleId, expected:new Date(a.expectedArrival), naptanId:a.naptanId, line:line}));
     }
-
-    function intersectVehicles(a,b){
-      const setA=new Set(a.map(x=>x.vehicleId));
-      return b.filter(x=>setA.has(x.vehicleId));
-    }
+    function intersectVehicles(a,b){ const setA=new Set(a.map(x=>x.vehicleId)); return b.filter(x=>setA.has(x.vehicleId)); }
 
     async function inferFromTwoStops(prev, last){
-      // Pull arrivals around when we were there
+      let arrivalsA, arrivalsB;
       try{
-        lastArrivalsA = await arrivalsAt(prev.id);
-        lastArrivalsB = await arrivalsAt(last.id);
-      }catch(e){
-        pushTimeline('bad','TfL arrivals unavailable'); return null;
-      }
-      // Find line candidates common to both stops
-      const linesA = Array.from(new Set(lastArrivalsA.map(x=>x.lineName||x.lineId)));
-      const linesB = Array.from(new Set(lastArrivalsB.map(x=>x.lineName||x.lineId)));
+        [arrivalsA, arrivalsB] = await Promise.all([arrivalsAt(prev.id), arrivalsAt(last.id)]);
+      }catch(e){ pushTimeline('bad','TfL arrivals unavailable'); return null; }
+
+      const linesA = Array.from(new Set(arrivalsA.map(x=>x.lineName||x.lineId)));
+      const linesB = Array.from(new Set(arrivalsB.map(x=>x.lineName||x.lineId)));
       const lines = linesA.filter(x=>linesB.includes(x));
       if(!lines.length){ pushTimeline('bad','No common lines between consecutive stops'); return null; }
 
-      // Score each line by intersecting vehicleIds
       let best={line:null, vehicleId:null, score:0};
       for(const L of lines){
-        const VA = vehiclesForLine(lastArrivalsA,L);
-        const VB = vehiclesForLine(lastArrivalsB,L);
+        const VA = vehiclesForLine(arrivalsA,L);
+        const VB = vehiclesForLine(arrivalsB,L);
         const inter = intersectVehicles(VA,VB);
         if(inter.length){
-          // choose the one whose expected time at last stop is closest to when we arrived at last
           inter.sort((u,v)=> Math.abs((+u.expected)-Date.now()) - Math.abs((+v.expected)-Date.now()));
           const pick = inter[0];
-          const score = Math.min(1, inter.length/3); // crude confidence
+          const score = Math.min(1, inter.length/3);
           if(score>best.score) best={line:String(L), vehicleId:pick.vehicleId, score};
         }
       }
       if(!best.line){ pushTimeline('warn','Could not pick a vehicle from intersections'); return null; }
 
-      // Try to get direction by seeing which RouteSequence contains prev->last in order
+      // Direction guess via route sequence
       let dirGuess='inbound';
       try{
-        const seqIn = await lineSeq(best.line,'inbound');
-        const seqOut= await lineSeq(best.line,'outbound');
+        const [seqIn, seqOut] = await Promise.all([lineSeq(best.line,'inbound'), lineSeq(best.line,'outbound')]);
         const hasForward=(seq)=> (seq.stopPointSequences||[]).some(sq=>{
           const idx1=(sq.stopPoint||[]).findIndex(sp=>sp.id===prev.id);
           const idx2=(sq.stopPoint||[]).findIndex(sp=>sp.id===last.id);
@@ -218,7 +235,6 @@
 
     function setInferred(info){
       inferred = info;
-      lockLine = info?.line || null;
       knownDirection = info?.dir || knownDirection;
       elLine.textContent = info?.line || '—';
       elDir.textContent  = info?.dir  || '—';
@@ -226,38 +242,65 @@
       elConf.textContent = info ? `${Math.round(info.conf*100)}%` : '—';
     }
 
+    /* ===== Geolocation permission UX ===== */
+    async function getGeoPermissionState() {
+      if (!navigator.permissions) return null;
+      try {
+        const st = await navigator.permissions.query({ name: 'geolocation' });
+        return st.state; // 'granted' | 'prompt' | 'denied'
+      } catch { return null; }
+    }
+    function showBanner(msg, actionLabel, action) {
+      let el = document.getElementById('geoBanner');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'geoBanner';
+        el.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;padding:10px;border-radius:10px;background:#11152c;color:#f3f5ff;border:1px solid rgba(255,255,255,.12);z-index:999;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+        const msgSpan = document.createElement('span');
+        const btn = document.createElement('button');
+        btn.id = 'geoBannerBtn';
+        btn.className = 'btn primary';
+        el.appendChild(msgSpan); el.appendChild(btn);
+        document.body.appendChild(el);
+      }
+      el.children[0].textContent = msg;
+      const btn = document.getElementById('geoBannerBtn');
+      btn.textContent = actionLabel;
+      btn.onclick = action;
+      el.style.display = '';
+    }
+    function hideBanner(){ const el = document.getElementById('geoBanner'); if(el) el.style.display='none'; }
+
     /* ===== GPS watcher ===== */
+    function onGeoError(err){
+      if (err.code === err.PERMISSION_DENIED) {
+        showBanner('Location is blocked. Turn it on to auto-detect stops, or use Manual Mode.', 'Manual Mode', openManualMode);
+      } else {
+        showBanner('Could not get location. Try again or use Manual Mode.', 'Retry', () => { hideBanner(); startGeo(); });
+      }
+    }
     async function onFix(pos){
       lastFix = pos;
-      elGps.textContent = labelFix(pos);
-      const {latitude:lat, longitude:lon, accuracy} = pos.coords;
-      // If accuracy is very poor, skip
-      if (accuracy>100) return;
+      elGps.textContent = `${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)} · ±${pos.coords.accuracy|0} m`;
+      // Skip poor fixes
+      if (pos.coords.accuracy > 100) return;
 
-      // Find nearest stop within 60 m
-      let near = null;
+      // Find nearest stop within ~60m
+      let near=null;
       try{
-        const nearby = await nearbyStops(lat,lon,120);
-        near = bestStop(nearby,lat,lon);
-      }catch{ near=null; }
-
-      if(!near || near.distance>60){
-        elNear.textContent = '—';
-        return;
-      }
+        const nearby=await nearbyStops(pos.coords.latitude, pos.coords.longitude, 120);
+        near = bestStop(nearby, pos.coords.latitude, pos.coords.longitude);
+      }catch{}
+      if(!near || near.distance>60){ elNear.textContent='—'; return; }
 
       elNear.textContent = `${near.name} (${near.distance|0} m)`;
 
-      // If this is the same stop as we already have, do nothing
-      if(lastStop && lastStop.id===near.id) return;
-
-      // We arrived at a (new) stop: shift prevStop
+      if(lastStop && lastStop.id===near.id) return; // same stop
       prevStop = lastStop;
-      lastStop = { id: near.id, name: near.name, when: Date.now() };
+      lastStop = { id: near.id, name: near.name, lat: near.lat, lon: near.lon, when: Date.now() };
       elStops.textContent = `${prevStop?prevStop.name:'—'} → ${lastStop.name}`;
       pushTimeline('ok', `At stop: ${lastStop.name}`);
 
-      // If we have two consecutive stops, try to infer bus
       if(prevStop){
         const guess = await inferFromTwoStops(prevStop,lastStop);
         if(guess){
@@ -266,31 +309,77 @@
         }
       }
     }
-
-    function onErr(err){
-      elGps.textContent = `Error: ${err.message}`;
-      pushTimeline('bad', `GPS error: ${err.message}`);
-    }
-
-    function start(){
-      if(watchId!=null) return;
+    function startGeo() {
+      if (!('geolocation' in navigator)) {
+        showBanner('This browser does not support GPS. Use Manual Mode.', 'Manual Mode', openManualMode);
+        return;
+      }
+      if (watchId!=null) return;
+      hideBanner();
       pushTimeline('warn','Tracking started');
-      watchId = navigator.geolocation.watchPosition(onFix, onErr, {
+      watchId = navigator.geolocation.watchPosition(onFix, onGeoError, {
         enableHighAccuracy:true, timeout:15000, maximumAge:3000
       });
     }
-    function stop(){
-      if(watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
-      pushTimeline('bad','Tracking stopped');
+    function stopGeo(){
+      if(watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; pushTimeline('bad','Tracking stopped'); }
     }
 
-    startBtn.onclick = ()=>{
-      if(!('geolocation' in navigator)){ alert('Geolocation not supported'); return; }
-      start();
-    };
-    stopBtn.onclick = stop;
+    startBtn.onclick = startGeo;
+    stopBtn.onclick = stopGeo;
 
-    // SW for PWA
+    (async ()=>{
+      const st = await getGeoPermissionState();
+      if (st === 'denied') showBanner('Location is blocked. You can still use Manual Mode.', 'Manual Mode', openManualMode);
+    })();
+
+    /* ===== Manual Mode ===== */
+    const modal = document.getElementById('manualModal');
+    const qA=document.getElementById('qA'), qB=document.getElementById('qB');
+    const lbA=document.getElementById('lbA'), lbB=document.getElementById('lbB');
+    const useABtn=document.getElementById('useABtn'), useBBtn=document.getElementById('useBBtn'), inferBtn=document.getElementById('inferBtn');
+    const closeManual=document.getElementById('closeManual'), manualHint=document.getElementById('manualHint');
+
+    let selA=null, selB=null;
+
+    function openManualMode(){ modal.style.display='flex'; hideBanner(); }
+    function closeManualMode(){ modal.style.display='none'; }
+
+    async function searchInto(q, lb, setSel){
+      lb.innerHTML = '<div class="lb-item muted">Searching…</div>';
+      try{
+        const res = await searchStops(q.trim());
+        const items = (res.matches||[]).slice(0,25);
+        lb.innerHTML = items.length? '' : '<div class="lb-item muted">No results</div>';
+        items.forEach(m=>{
+          const name = m.name || m.commonName || 'Stop';
+          const id = m.id;
+          const el=document.createElement('div');
+          el.className='lb-item';
+          el.textContent = `${name} — ${id}`;
+          el.onclick = ()=>{ setSel({id, name}); showToast(`Selected: ${name}`); };
+          lb.appendChild(el);
+        });
+      }catch{
+        lb.innerHTML = '<div class="lb-item muted">Error</div>';
+      }
+    }
+
+    qA.addEventListener('input', ()=> { if(qA.value.trim().length>=3) searchInto(qA.value, lbA, (v)=>{ selA=v; }); });
+    qB.addEventListener('input', ()=> { if(qB.value.trim().length>=3) searchInto(qB.value, lbB, (v)=>{ selB=v; }); });
+
+    useABtn.onclick=()=>{ if(selA){ prevStop=selA; elStops.textContent=`${prevStop.name} → ${lastStop?lastStop.name:'—'}`; showToast('Stop A set'); } };
+    useBBtn.onclick=()=>{ if(selB){ lastStop=selB; elStops.textContent=`${prevStop?prevStop.name:'—'} → ${lastStop.name}`; showToast('Stop B set'); } };
+
+    inferBtn.onclick=async ()=>{
+      if(!(prevStop && lastStop)){ manualHint.textContent='Pick both Stop A and Stop B.'; return; }
+      const guess = await inferFromTwoStops(prevStop,lastStop);
+      if(guess){ setInferred(guess); pushTimeline('warn', `Line ${guess.line} · vehicle ${guess.vehicleId} · ${guess.dir} · ${Math.round(guess.conf*100)}%`); closeManualMode(); }
+      else { manualHint.textContent='Could not infer from these stops. Try adjacent stops on the same line.'; }
+    };
+    closeManual.onclick=closeManualMode;
+
+    // PWA SW
     if('serviceWorker' in navigator){ addEventListener('load',()=>navigator.serviceWorker.register('service-worker.js')); }
   </script>
 </body>
