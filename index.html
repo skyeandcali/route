@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Which Bus Am I On?</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#8b5cf6">
+  <style>
+    :root{
+      --bg:#0f1220; --card:#171b34; --text:#f3f5ff; --muted:#9aa0bf; --accent:#8b5cf6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+      --border:rgba(255,255,255,.12);
+    }
+    [data-theme="light"]{
+      --bg:#faf7ff; --card:#ffffff; --text:#0f1220; --muted:#5b5f7a; --accent:#7c3aed; --border:rgba(0,0,0,.12);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
+    .wrap{max-width:720px;margin:0 auto;padding:16px}
+    h1{margin:8px 0 12px;font-size:20px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px;margin-bottom:12px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 14px;border-radius:12px;border:1px solid var(--border);background:#11152c;color:#f3f5ff;cursor:pointer;font-weight:800}
+    [data-theme="light"] .btn{background:#f3e8ff;color:#111;border-color:#e9d5ff}
+    .btn.primary{background:linear-gradient(135deg,#8b5cf6,#a78bfa);color:#111;border:0}
+    .muted{color:var(--muted)}
+    .kv{display:grid;grid-template-columns:140px 1fr;gap:6px 10px;font-size:15px}
+    .kv div:nth-child(odd){color:var(--muted)}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;border:1px solid var(--border);background:#101327}
+    .dot{width:10px;height:10px;border-radius:999px}
+    .ok{background:var(--ok)} .warn{background:var(--warn)} .bad{background:var(--bad)}
+    .mono{font-family:ui-monospace, Menlo, Consolas, monospace}
+    .hint{font-size:13px;color:var(--muted)}
+    .list{margin:0;padding:0;list-style:none}
+    .list li{padding:10px;border-bottom:1px dashed var(--border)}
+    .list li:last-child{border-bottom:0}
+    .switch{--w:48px;--h:28px;position:relative;display:inline-flex;width:var(--w);height:var(--h)}
+    .switch input{opacity:0;position:absolute;inset:0}
+    .switch .track{width:var(--w);height:var(--h);background:#9ca3af;border-radius:999px;transition:.2s}
+    .switch .thumb{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:.2s}
+    .switch input:checked + .track{background:#8b5cf6}
+    .switch input:checked + .track + .thumb{left:23px}
+    .toast{position:fixed;right:14px;bottom:14px;background:#11152c;border:1px solid var(--border);color:#f3f5ff;padding:10px 12px;border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.35);opacity:0;transform:translateY(8px);transition:all .2s}
+    .toast.show{opacity:1;transform:none}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Which Bus Am I On?</h1>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <button id="startBtn" class="btn primary">Start</button>
+          <button id="stopBtn" class="btn">Stop</button>
+        </div>
+        <div class="row">
+          <span class="muted">Light</span>
+          <label class="switch" title="Theme">
+            <input id="theme" type="checkbox">
+            <span class="track"></span><span class="thumb"></span>
+          </label>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:8px">
+        Tip: keep the phone by a window; enable “Precise Location”. We only use GPS on your device.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="kv">
+        <div>GPS:</div><div id="gps">—</div>
+        <div>Nearest stop:</div><div id="near">—</div>
+        <div>Last 2 stops:</div><div id="stops">—</div>
+        <div>Line guess:</div><div id="line">—</div>
+        <div>Direction:</div><div id="dir">—</div>
+        <div>Vehicle ID:</div><div id="veh" class="mono">—</div>
+        <div>Confidence:</div><div id="conf">—</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="gap:8px;margin-bottom:6px">
+        <span class="pill"><span class="dot ok"></span> Passing</span>
+        <span class="pill"><span class="dot warn"></span> Candidate</span>
+        <span class="pill"><span class="dot bad"></span> Discarded</span>
+      </div>
+      <ul id="timeline" class="list"></ul>
+    </div>
+
+    <p class="hint">
+      Powered by TfL Unified API. We look at consecutive stop visits and intersect vehicles that were due at both stops on the same line.
+    </p>
+  </div>
+
+  <div id="toast" class="toast">Copied!</div>
+
+  <script>
+    /* ===== Theme ===== */
+    const root=document.documentElement, theme=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); localStorage.setItem('wb_theme',t); theme.checked=(t==='light'); }
+    setTheme(localStorage.getItem('wb_theme')||'dark');
+    theme.addEventListener('change',()=> setTheme(theme.checked?'light':'dark'));
+
+    const toast=document.getElementById('toast');
+    const showToast=m=>{ toast.textContent=m; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'),1200); };
+
+    /* ===== TfL helpers ===== */
+    const APP_ID="", APP_KEY="";
+    const qs=o=>new URLSearchParams({...o,...((APP_ID&&APP_KEY)?{app_id:APP_ID,app_key:APP_KEY}:{})}).toString();
+    const tfl=async path=>{ const r=await fetch(`https://api.tfl.gov.uk${path}`); if(!r.ok) throw new Error('TfL'); return r.json(); };
+    const nearbyStops=(lat,lon,radius=120)=> tfl(`/StopPoint?${qs({lat,lon,stopTypes:'NaptanPublicBusCoachTram',radius,modes:'bus'})}`);
+    const arrivalsAt=(stopId)=> tfl(`/StopPoint/${encodeURIComponent(stopId)}/Arrivals?${qs({modes:'bus'})}`);
+    const lineSeq=(line,dir)=> tfl(`/Line/${encodeURIComponent(line)}/Route/Sequence/${dir}?${qs({excludeCrowding:true,serviceTypes:'Regular'})}`);
+    const hav=(a,b)=>{const toRad=x=>x*Math.PI/180;const R=6371000;const dLat=toRad(b.lat-a.lat),dLon=toRad(b.lon-a.lon);const s1=Math.sin(dLat/2),s2=Math.sin(dLon/2);const c1=Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat));return 2*R*Math.asin(Math.sqrt(s1*s1+c1*s2*s2));};
+
+    /* ===== UI refs ===== */
+    const elGps = document.getElementById('gps');
+    const elNear = document.getElementById('near');
+    const elStops = document.getElementById('stops');
+    const elLine = document.getElementById('line');
+    const elDir = document.getElementById('dir');
+    const elVeh = document.getElementById('veh');
+    const elConf = document.getElementById('conf');
+    const timeline = document.getElementById('timeline');
+
+    const startBtn=document.getElementById('startBtn'), stopBtn=document.getElementById('stopBtn');
+
+    /* ===== State ===== */
+    let watchId=null;
+    let lastFix=null;
+    let lastStop=null;          // {id,name,when}
+    let prevStop=null;
+    let lastArrivalsA=null;     // arrivals snapshot at prev stop
+    let lastArrivalsB=null;     // arrivals snapshot at last stop
+    let inferred=null;          // {line, dir, vehicleId, conf:0..1}
+    let lockLine=null;          // line we’re tracking once inferred
+    let knownDirection=null;    // 'inbound' or 'outbound'
+
+    /* ===== Helpers ===== */
+    function labelFix(p){ if(!p) return '—'; const acc = p.coords.accuracy|0; return `${p.coords.latitude.toFixed(5)}, ${p.coords.longitude.toFixed(5)} · ±${acc} m`; }
+    function pushTimeline(kind,text){
+      const li=document.createElement('li');
+      li.innerHTML = `<span class="dot ${kind}"></span> <span class="mono">${new Date().toLocaleTimeString()}</span> — ${text}`;
+      timeline.prepend(li);
+    }
+    function bestStop(stops,lat,lon){
+      if(!stops?.stopPoints?.length) return null;
+      let best=null, dBest=1e9;
+      for(const s of stops.stopPoints){
+        const d = hav({lat,lon},{lat:s.lat,lon:s.lon});
+        if(d<dBest){ dBest=d; best=s; }
+      }
+      return {id:best.id,name:best.commonName||best.name, distance:dBest};
+    }
+
+    function vehiclesForLine(arr,line){
+      const L = String(line).toUpperCase();
+      return arr.filter(a=>{
+        const id=(a.lineId||'').toUpperCase(), nm=(a.lineName||'').toUpperCase();
+        return id===L || nm===L || id.startsWith(L) || nm.startsWith(L);
+      }).map(a=>({vehicleId:a.vehicleId, expected:new Date(a.expectedArrival), naptanId:a.naptanId}));
+    }
+
+    function intersectVehicles(a,b){
+      const setA=new Set(a.map(x=>x.vehicleId));
+      return b.filter(x=>setA.has(x.vehicleId));
+    }
+
+    async function inferFromTwoStops(prev, last){
+      // Pull arrivals around when we were there
+      try{
+        lastArrivalsA = await arrivalsAt(prev.id);
+        lastArrivalsB = await arrivalsAt(last.id);
+      }catch(e){
+        pushTimeline('bad','TfL arrivals unavailable'); return null;
+      }
+      // Find line candidates common to both stops
+      const linesA = Array.from(new Set(lastArrivalsA.map(x=>x.lineName||x.lineId)));
+      const linesB = Array.from(new Set(lastArrivalsB.map(x=>x.lineName||x.lineId)));
+      const lines = linesA.filter(x=>linesB.includes(x));
+      if(!lines.length){ pushTimeline('bad','No common lines between consecutive stops'); return null; }
+
+      // Score each line by intersecting vehicleIds
+      let best={line:null, vehicleId:null, score:0};
+      for(const L of lines){
+        const VA = vehiclesForLine(lastArrivalsA,L);
+        const VB = vehiclesForLine(lastArrivalsB,L);
+        const inter = intersectVehicles(VA,VB);
+        if(inter.length){
+          // choose the one whose expected time at last stop is closest to when we arrived at last
+          inter.sort((u,v)=> Math.abs((+u.expected)-Date.now()) - Math.abs((+v.expected)-Date.now()));
+          const pick = inter[0];
+          const score = Math.min(1, inter.length/3); // crude confidence
+          if(score>best.score) best={line:String(L), vehicleId:pick.vehicleId, score};
+        }
+      }
+      if(!best.line){ pushTimeline('warn','Could not pick a vehicle from intersections'); return null; }
+
+      // Try to get direction by seeing which RouteSequence contains prev->last in order
+      let dirGuess='inbound';
+      try{
+        const seqIn = await lineSeq(best.line,'inbound');
+        const seqOut= await lineSeq(best.line,'outbound');
+        const hasForward=(seq)=> (seq.stopPointSequences||[]).some(sq=>{
+          const idx1=(sq.stopPoint||[]).findIndex(sp=>sp.id===prev.id);
+          const idx2=(sq.stopPoint||[]).findIndex(sp=>sp.id===last.id);
+          return idx1>-1 && idx2>-1 && idx2>idx1;
+        });
+        if     (hasForward(seqIn) && !hasForward(seqOut)) dirGuess='inbound';
+        else if(hasForward(seqOut) && !hasForward(seqIn)) dirGuess='outbound';
+        else if(hasForward(seqOut) && hasForward(seqIn))  dirGuess = knownDirection || 'inbound';
+      }catch{}
+
+      return { line:best.line, vehicleId:best.vehicleId, dir:dirGuess, conf:best.score };
+    }
+
+    function setInferred(info){
+      inferred = info;
+      lockLine = info?.line || null;
+      knownDirection = info?.dir || knownDirection;
+      elLine.textContent = info?.line || '—';
+      elDir.textContent  = info?.dir  || '—';
+      elVeh.textContent  = info?.vehicleId || '—';
+      elConf.textContent = info ? `${Math.round(info.conf*100)}%` : '—';
+    }
+
+    /* ===== GPS watcher ===== */
+    async function onFix(pos){
+      lastFix = pos;
+      elGps.textContent = labelFix(pos);
+      const {latitude:lat, longitude:lon, accuracy} = pos.coords;
+      // If accuracy is very poor, skip
+      if (accuracy>100) return;
+
+      // Find nearest stop within 60 m
+      let near = null;
+      try{
+        const nearby = await nearbyStops(lat,lon,120);
+        near = bestStop(nearby,lat,lon);
+      }catch{ near=null; }
+
+      if(!near || near.distance>60){
+        elNear.textContent = '—';
+        return;
+      }
+
+      elNear.textContent = `${near.name} (${near.distance|0} m)`;
+
+      // If this is the same stop as we already have, do nothing
+      if(lastStop && lastStop.id===near.id) return;
+
+      // We arrived at a (new) stop: shift prevStop
+      prevStop = lastStop;
+      lastStop = { id: near.id, name: near.name, when: Date.now() };
+      elStops.textContent = `${prevStop?prevStop.name:'—'} → ${lastStop.name}`;
+      pushTimeline('ok', `At stop: ${lastStop.name}`);
+
+      // If we have two consecutive stops, try to infer bus
+      if(prevStop){
+        const guess = await inferFromTwoStops(prevStop,lastStop);
+        if(guess){
+          setInferred(guess);
+          pushTimeline('warn', `Line ${guess.line} · vehicle ${guess.vehicleId} · ${guess.dir} · ${Math.round(guess.conf*100)}%`);
+        }
+      }
+    }
+
+    function onErr(err){
+      elGps.textContent = `Error: ${err.message}`;
+      pushTimeline('bad', `GPS error: ${err.message}`);
+    }
+
+    function start(){
+      if(watchId!=null) return;
+      pushTimeline('warn','Tracking started');
+      watchId = navigator.geolocation.watchPosition(onFix, onErr, {
+        enableHighAccuracy:true, timeout:15000, maximumAge:3000
+      });
+    }
+    function stop(){
+      if(watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+      pushTimeline('bad','Tracking stopped');
+    }
+
+    startBtn.onclick = ()=>{
+      if(!('geolocation' in navigator)){ alert('Geolocation not supported'); return; }
+      start();
+    };
+    stopBtn.onclick = stop;
+
+    // SW for PWA
+    if('serviceWorker' in navigator){ addEventListener('load',()=>navigator.serviceWorker.register('service-worker.js')); }
+  </script>
+</body>
+</html>
